@@ -1,7 +1,6 @@
 // /api/analyze.js
 // Vercel Serverless Function — PRD Analysis via Gemini API
-
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// @google/generative-ai is required inside the handler for safer cold starts
 
 // ─── PROMPT ─────────────────────────────────────────────────────────────────
 function buildPrompt(prd, intensity) {
@@ -188,46 +187,44 @@ function sanitiseResponse(parsed) {
 
 // ─── HANDLER ────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
-  // CORS headers — allow any origin for demo use
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // ── Explicit body parsing (Vercel doesn't always auto-parse) ────────────
+  let body = req.body;
+  if (!body || typeof body === 'string') {
+    try {
+      body = JSON.parse(req.body || '{}');
+    } catch (_) {
+      body = {};
+    }
   }
 
-  // Only allow POST
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  // ── Validate input ──────────────────────────────────────────────────────
-  const { prd, intensity } = req.body || {};
-
-  if (!prd || typeof prd !== 'string') {
-    return res.status(400).json({ error: 'Missing or invalid "prd" field' });
-  }
-
-  if (prd.trim().length < 20) {
-    return res.status(400).json({ error: 'PRD text is too short — paste the full document' });
+  // ── Validate input ───────────────────────────────────────────────────────
+  const { prd, intensity } = body;
+  if (!prd || typeof prd !== 'string' || prd.trim().length < 20) {
+    return res.status(400).json({ error: 'Missing or too-short "prd" field (min 20 chars)' });
   }
 
   // ── Check API key ────────────────────────────────────────────────────────
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_API_KEY) {
-    console.error('GEMINI_API_KEY environment variable is not set');
-    return res.status(500).json({ error: 'Server configuration error — API key not set' });
+    console.error('[analyze] GEMINI_API_KEY is not set in environment variables');
+    return res.status(500).json({
+      error: 'GEMINI_API_KEY not configured — add it in Vercel: Project Settings → Environment Variables'
+    });
   }
 
   // ── Call Gemini ──────────────────────────────────────────────────────────
   try {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
     const prompt = buildPrompt(prd, intensity || 'spicy');
-
     const result = await model.generateContent(prompt);
     const rawText = result.response.text();
 
@@ -237,29 +234,26 @@ module.exports = async function handler(req, res) {
       parsed = extractJSON(rawText);
     } catch (parseError) {
       console.error('[analyze] JSON extraction failed:', parseError.message);
-      console.error('[analyze] Raw response (first 600 chars):', rawText.substring(0, 600));
-      return res.status(502).json({
-        error: 'AI returned an unreadable response — please try again',
-      });
+      console.error('[analyze] Raw (first 600):', rawText.substring(0, 600));
+      return res.status(502).json({ error: 'AI returned an unreadable response — please try again' });
     }
 
-    const response = sanitiseResponse(parsed);
-    return res.status(200).json(response);
+    return res.status(200).json(sanitiseResponse(parsed));
 
   } catch (err) {
-    console.error('Gemini API error:', err.message || err);
+    const msg = err.message || String(err);
+    console.error('[analyze] Gemini error:', msg);
 
-    // Specific error messages for common failures
-    if (err.message?.includes('API_KEY_INVALID') || err.message?.includes('403')) {
-      return res.status(401).json({ error: 'Invalid Gemini API key — check your GEMINI_API_KEY env variable' });
+    if (msg.includes('API_KEY_INVALID') || msg.includes('403')) {
+      return res.status(401).json({ error: 'Invalid Gemini API key — check GEMINI_API_KEY in Vercel env vars' });
     }
-    if (err.message?.includes('QUOTA') || err.message?.includes('429')) {
-      return res.status(429).json({ error: 'Gemini quota exceeded — try again in a moment' });
+    if (msg.includes('QUOTA') || msg.includes('429') || msg.includes('Resource has been exhausted')) {
+      return res.status(429).json({ error: 'Gemini free quota exceeded — wait a minute and try again' });
     }
-    if (err.message?.includes('SAFETY')) {
+    if (msg.includes('SAFETY')) {
       return res.status(422).json({ error: 'Content flagged by safety filter — try a different PRD' });
     }
 
-    return res.status(500).json({ error: 'Even AI gave up on this PRD 😅 — please try again' });
+    return res.status(500).json({ error: 'Even AI gave up on this PRD 😅 — ' + msg.substring(0, 120) });
   }
 };

@@ -47,18 +47,23 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { transcript } = req.body || {};
+  // Explicit body parsing
+  let body = req.body;
+  if (!body || typeof body === 'string') {
+    try { body = JSON.parse(req.body || '{}'); } catch(_) { body = {}; }
+  }
+
+  const { transcript } = body;
   if (!transcript || typeof transcript !== 'string' || transcript.trim().length < 10) {
     return res.status(400).json({ error: 'Missing or empty transcript' });
   }
 
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_API_KEY) {
-    return res.status(500).json({ error: 'Server configuration error' });
+    return res.status(500).json({ error: 'GEMINI_API_KEY not set in Vercel environment variables' });
   }
 
   const prompt = `You are an expert product manager coach. A stakeholder design review just happened.
@@ -67,28 +72,25 @@ Transcript segments: "${transcript.substring(0, 3000)}"
 Analyse the feedback. Return ONLY a raw JSON array (no markdown, no backticks, no explanation):
 [
   {"type":"take","text":"<actionable, user-grounded feedback worth implementing — be specific, reference the transcript>"},
-  {"type":"take","text":"<another valid point>"},
   {"type":"ignore","text":"<feedback that is vague, political, or not user-grounded — explain briefly why to deprioritise>"},
-  {"type":"ignore","text":"<another to ignore with brief reason>"},
   {"type":"neutral","text":"<something that needs more data or context before deciding>"}
 ]
 Be honest, witty, and specific. Always reference the actual transcript content.`;
 
   try {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const result = await model.generateContent(prompt);
     const rawText = result.response.text();
 
     let parsed;
-    try {
-      parsed = extractJSON(rawText);
-    } catch (e) {
+    try { parsed = extractJSON(rawText); }
+    catch (e) {
       console.error('[stakeholder] JSON extraction failed:', e.message);
       return res.status(502).json({ error: 'AI returned an unreadable response — try again' });
     }
 
-    // Ensure we always return an array
     const insights = Array.isArray(parsed) ? parsed : (parsed.insights || parsed.feedback || []);
     const safe = insights
       .filter(i => i && typeof i.type === 'string' && typeof i.text === 'string')
@@ -97,7 +99,7 @@ Be honest, witty, and specific. Always reference the actual transcript content.`
 
     return res.status(200).json(safe);
   } catch (err) {
-    console.error('Stakeholder API error:', err.message);
-    return res.status(500).json({ error: 'Even AI gave up on this PRD 😅 — please try again' });
+    console.error('[stakeholder] error:', err.message);
+    return res.status(500).json({ error: 'Even AI gave up 😅 — ' + (err.message||'').substring(0,100) });
   }
 };
