@@ -1,7 +1,5 @@
 // /api/analyze.js
-// Vercel Serverless Function — PRD Analysis via Gemini API
-
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// Vercel Serverless Function — PRD Analysis via OpenAI API
 
 // ─── PROMPT ─────────────────────────────────────────────────────────────────
 function buildPrompt(prd, intensity) {
@@ -188,78 +186,99 @@ function sanitiseResponse(parsed) {
 
 // ─── HANDLER ────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
-  // CORS headers — allow any origin for demo use
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  // ── Explicit body parsing (Vercel doesn't always auto-parse) ────────────
+  let body = req.body;
+  if (!body || typeof body === 'string') {
+    try {
+      body = JSON.parse(req.body || '{}');
+    } catch (_) {
+      body = {};
+    }
   }
 
-  // Only allow POST
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  // ── Validate input ──────────────────────────────────────────────────────
-  const { prd, intensity } = req.body || {};
-
-  if (!prd || typeof prd !== 'string') {
-    return res.status(400).json({ error: 'Missing or invalid "prd" field' });
-  }
-
-  if (prd.trim().length < 20) {
-    return res.status(400).json({ error: 'PRD text is too short — paste the full document' });
+  // ── Validate input ───────────────────────────────────────────────────────
+  const { prd, intensity } = body;
+  if (!prd || typeof prd !== 'string' || prd.trim().length < 20) {
+    return res.status(400).json({ error: 'Missing or too-short "prd" field (min 20 chars)' });
   }
 
   // ── Check API key ────────────────────────────────────────────────────────
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) {
-    console.error('GEMINI_API_KEY environment variable is not set');
-    return res.status(500).json({ error: 'Server configuration error — API key not set' });
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_API_KEY) {
+    console.error('[analyze] OPENAI_API_KEY is not set');
+    return res.status(500).json({
+      error: 'OPENAI_API_KEY not configured — add it in Vercel: Project Settings → Environment Variables'
+    });
   }
 
-  // ── Call Gemini ──────────────────────────────────────────────────────────
+  // ── Call OpenAI ──────────────────────────────────────────────────────────
+  const prompt = buildPrompt(prd, intensity || 'spicy');
+
   try {
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    console.log('[analyze] Calling OpenAI gpt-4o-mini…');
 
-    const prompt = buildPrompt(prd, intensity || 'spicy');
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        max_tokens: 2400,
+        temperature: 0.7,
+        response_format: { type: 'json_object' }, // forces valid JSON output
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a world-class senior product critic. Always respond with raw JSON only — no markdown, no explanation, no preamble.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      }),
+    });
 
-    const result = await model.generateContent(prompt);
-    const rawText = result.response.text();
+    if (!openaiRes.ok) {
+      const errBody = await openaiRes.json().catch(() => ({}));
+      const errMsg = errBody.error?.message || `HTTP ${openaiRes.status}`;
+      console.error('[analyze] OpenAI error:', errMsg);
 
-    // ── Extract + sanitise JSON ──────────────────────────────────────────
+      if (openaiRes.status === 401) return res.status(401).json({ error: 'Invalid OpenAI API key — check OPENAI_API_KEY in Vercel env vars' });
+      if (openaiRes.status === 429) return res.status(429).json({ error: 'OpenAI quota exceeded — check your plan at platform.openai.com/usage' });
+      if (openaiRes.status === 402) return res.status(402).json({ error: 'OpenAI billing required — add a payment method at platform.openai.com/account/billing' });
+      return res.status(500).json({ error: 'OpenAI error: ' + errMsg.substring(0, 120) });
+    }
+
+    const openaiData = await openaiRes.json();
+    const rawText = openaiData.choices?.[0]?.message?.content || '';
+
     let parsed;
     try {
       parsed = extractJSON(rawText);
     } catch (parseError) {
       console.error('[analyze] JSON extraction failed:', parseError.message);
-      console.error('[analyze] Raw response (first 600 chars):', rawText.substring(0, 600));
-      return res.status(502).json({
-        error: 'AI returned an unreadable response — please try again',
-      });
+      console.error('[analyze] Raw (first 600):', rawText.substring(0, 600));
+      return res.status(502).json({ error: 'AI returned an unreadable response — please try again' });
     }
 
+    console.log('[analyze] Success with gpt-4o-mini');
     const response = sanitiseResponse(parsed);
+    response._model = 'gpt-4o-mini';
     return res.status(200).json(response);
 
   } catch (err) {
-    console.error('Gemini API error:', err.message || err);
-
-    // Specific error messages for common failures
-    if (err.message?.includes('API_KEY_INVALID') || err.message?.includes('403')) {
-      return res.status(401).json({ error: 'Invalid Gemini API key — check your GEMINI_API_KEY env variable' });
-    }
-    if (err.message?.includes('QUOTA') || err.message?.includes('429')) {
-      return res.status(429).json({ error: 'Gemini quota exceeded — try again in a moment' });
-    }
-    if (err.message?.includes('SAFETY')) {
-      return res.status(422).json({ error: 'Content flagged by safety filter — try a different PRD' });
-    }
-
-    return res.status(500).json({ error: 'Even AI gave up on this PRD 😅 — please try again' });
+    const msg = err.message || String(err);
+    console.error('[analyze] OpenAI call failed:', msg);
+    return res.status(500).json({ error: 'Even AI gave up on this PRD 😅 — ' + msg.substring(0, 120) });
   }
 };

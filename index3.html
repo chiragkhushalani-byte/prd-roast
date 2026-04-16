@@ -780,114 +780,38 @@ html,body{
 /* ══════════════════════════════════════════════
    SCAN OVERLAY
 ══════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════
-   FULL-SCREEN LOADER
-══════════════════════════════════════════════ */
 #scan-overlay{
-  position:fixed;
-  inset:0;
-  z-index:900;
-  background:var(--bg);
-  display:none;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  gap:0;
-  opacity:0;
-  transition:opacity 0.25s ease;
+  position:fixed;inset:0;top:var(--nav);bottom:var(--bar);
+  background:rgba(19,21,28,0.88);backdrop-filter:blur(8px);
+  z-index:400;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:20px;
 }
-#scan-overlay.on{
-  display:flex;
+#scan-overlay.on{display:flex;}
+#scan-face-wrap{position:relative;}
+#scan-halo{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  width:110px;height:110px;border-radius:50%;
+  background:radial-gradient(circle,rgba(180,110,255,0.22) 0%,transparent 70%);
+  animation:scanHalo 1.5s ease-in-out infinite alternate;
 }
-#scan-overlay.visible{
-  opacity:1;
+@keyframes scanHalo{
+  from{transform:translate(-50%,-50%) scale(0.9);opacity:0.5;}
+  to{transform:translate(-50%,-50%) scale(1.2);opacity:1;}
 }
-#scan-overlay.fade-out{
-  opacity:0;
-  pointer-events:none;
-  transition:opacity 0.5s ease;
+#scan-spin{
+  width:42px;height:42px;border-radius:50%;
+  border:2px solid rgba(180,110,255,0.2);
+  border-top-color:var(--purple);
+  animation:spin 0.8s linear infinite;
 }
-
-/* Fire emoji that pulses */
-#scan-fire{
-  font-size:56px;
-  margin-bottom:28px;
-  animation:fireWobble 1.4s ease-in-out infinite;
-  filter:drop-shadow(0 0 24px rgba(255,101,64,0.6));
-}
-@keyframes fireWobble{
-  0%,100%{transform:scale(1) rotate(-3deg);}
-  50%{transform:scale(1.12) rotate(3deg);}
-}
-
-/* Main message */
-#scan-msg{
-  font-size:22px;font-weight:800;
-  color:var(--text);
-  text-align:center;
-  max-width:420px;
-  line-height:1.35;
-  letter-spacing:-0.4px;
-  margin-bottom:10px;
-  transition:opacity 0.3s ease;
-  padding:0 24px;
-}
-
-/* Sub message */
-#scan-sub{
-  font-family:var(--mono);
-  font-size:11px;
-  color:var(--text-mid);
-  text-align:center;
-  letter-spacing:0.3px;
-  margin-bottom:40px;
-  transition:opacity 0.3s ease;
-  padding:0 24px;
-}
-
-/* Progress track */
-#scan-track{
-  width:min(380px, 80vw);
-  height:3px;
-  background:var(--surface2);
-  border-radius:99px;
-  overflow:hidden;
-  margin-bottom:16px;
-}
-#scan-bar{
-  height:100%;
-  width:0%;
-  background:linear-gradient(90deg, var(--orange), var(--purple));
-  border-radius:99px;
-  transition:width 0.4s cubic-bezier(0.4,0,0.2,1);
-  box-shadow:0 0 12px rgba(255,101,64,0.5);
-}
-
-/* Stage label */
-#scan-stage{
-  font-family:var(--mono);
-  font-size:9px;
-  color:var(--text-dim);
-  letter-spacing:2px;
-  text-transform:uppercase;
-  margin-bottom:40px;
-}
-
-/* Dots */
+@keyframes spin{to{transform:rotate(360deg);}}
+#scan-msg{font-size:16px;font-weight:700;color:var(--text);text-align:center;max-width:300px;line-height:1.4;}
+#scan-sub{font-family:var(--mono);font-size:10px;color:var(--text-mid);text-align:center;letter-spacing:0.3px;}
 .scan-dots{display:flex;gap:6px;}
-.sdot{
-  width:6px;height:6px;border-radius:50%;
-  background:var(--purple);
-  animation:dp 1.2s ease-in-out infinite;
-}
-.sdot:nth-child(2){animation-delay:0.2s;}
-.sdot:nth-child(3){animation-delay:0.4s;}
+.sdot{width:6px;height:6px;border-radius:50%;background:var(--purple);animation:dp 1.2s ease-in-out infinite;}
+.sdot:nth-child(2){animation-delay:0.2s;}.sdot:nth-child(3){animation-delay:0.4s;}
 @keyframes dp{0%,100%{opacity:0.3;transform:scale(0.8);}50%{opacity:1;transform:scale(1.2);}}
-
-/* hide old elements we no longer use */
-#scan-face-wrap,#scan-halo,#scan-spin{display:none;}
-
-
 
 /* ══════════════════════════════════════════════
    BOTTOM BAR (app screen only)
@@ -1518,23 +1442,22 @@ html,body{
 
 <!-- SCAN OVERLAY -->
 <div id="scan-overlay">
-  <!-- kept for JS compat, hidden via CSS -->
-  <div id="scan-face-wrap"><div id="scan-halo"></div></div>
+  <div id="scan-face-wrap">
+    <div id="scan-halo"></div>
+    <svg width="80" height="80" viewBox="0 0 80 80" fill="none" style="position:relative;z-index:1;">
+      <circle cx="40" cy="40" r="32" stroke="rgba(180,110,255,0.2)" stroke-width="1.5"/>
+      <ellipse cx="29" cy="35" rx="4" ry="4" fill="rgba(255,255,255,0.8)"/>
+      <ellipse cx="51" cy="35" rx="4" ry="4" fill="rgba(255,255,255,0.8)"/>
+      <path d="M26 50 Q40 44 54 50" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <path d="M26 27 Q29 24 33 26" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <path d="M47 26 Q51 24 54 27" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+    </svg>
+  </div>
   <div id="scan-spin"></div>
-
-  <div id="scan-fire">🔥</div>
   <div id="scan-msg">Reading between your vague lines…</div>
   <div id="scan-sub">Narrator: the lines were very vague.</div>
-
-  <div id="scan-track">
-    <div id="scan-bar"></div>
-  </div>
-  <div id="scan-stage">Connecting to Gemini…</div>
-
   <div class="scan-dots">
-    <div class="sdot"></div>
-    <div class="sdot"></div>
-    <div class="sdot"></div>
+    <div class="sdot"></div><div class="sdot"></div><div class="sdot"></div>
   </div>
 </div>
 
@@ -1690,11 +1613,21 @@ const MICRO_MAP = [
   [0, 'Engineering team is updating their LinkedIn.'],
 ];
 
+const SCAN_MSGS = [
+  ['Reading between your vague lines…',     'Narrator: the lines were very vague.'],
+  ['Scanning for success metrics…',         'Found: vibes. Not found: KPIs.'],
+  ['Checking user personas…',              'Population: assumed. Classic.'],
+  ['Counting "seamless experience" uses…', 'It was 4. Drinking game triggered.'],
+  ['Consulting senior PMs…',              'They all have opinions. Simultaneously.'],
+  ['Running completeness check…',         'Engineers are already afraid.'],
+];
+
 let intensity    = 'spicy';
 let prdText      = '';
 let lastResult   = null;
 let currentScore = null;
 let aCtx         = null;
+let scanInterval, progInterval, msgIdx = 0;
 
 /* ════════════════════════════════════════════
    HELPERS
@@ -2052,71 +1985,18 @@ function renderResults(data) {
 /* ════════════════════════════════════════════
    ANALYSIS
 ════════════════════════════════════════════ */
-/* ════════════════════════════════════════════
-   LOADER HELPERS
-════════════════════════════════════════════ */
-const LOADER_STAGES = [
-  { pct: 8,  stage: 'Connecting to Gemini…',         msg: 'Reading between your vague lines…',     sub: 'Narrator: the lines were very vague.'          },
-  { pct: 22, stage: 'Parsing PRD sections…',         msg: 'Scanning for success metrics…',         sub: 'Found: vibes. Not found: KPIs.'                },
-  { pct: 38, stage: 'Checking user personas…',       msg: 'Checking user personas…',               sub: 'Population: assumed. Classic.'                 },
-  { pct: 52, stage: 'Scoring clarity…',              msg: "Counting 'seamless experience' uses…",  sub: 'It was 4. Drinking game triggered.'            },
-  { pct: 65, stage: 'Evaluating product thinking…', msg: 'Consulting senior PMs…',                sub: 'They all have opinions. Simultaneously.'       },
-  { pct: 78, stage: 'Drafting the roast…',           msg: 'Running completeness check…',           sub: 'Engineers are already afraid.'                 },
-  { pct: 88, stage: 'Applying surgical critique…',  msg: 'Preparing devastating feedback…',        sub: 'This is a safe space. Just not for bad PRDs.' },
-  { pct: 94, stage: 'Almost done…',                 msg: 'Adding finishing touches…',              sub: 'The PM face is loading its expression.'        },
-];
-
-function showLoader() {
-  const el = $('scan-overlay');
-  if (!el) return;
-  el.classList.add('on');
-  // Trigger fade-in on next frame so transition works
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => el.classList.add('visible'));
-  });
-  setLoaderStage(0);
-}
-
-function setLoaderStage(idx) {
-  const s = LOADER_STAGES[Math.min(idx, LOADER_STAGES.length - 1)];
-  const bar = $('scan-bar');
-  if (bar) bar.style.width = s.pct + '%';
-  const stageEl = $('scan-stage');
-  if (stageEl) stageEl.textContent = s.stage;
-  const msgEl = $('scan-msg');
-  if (msgEl) { msgEl.style.opacity='0'; setTimeout(()=>{ msgEl.textContent=s.msg; msgEl.style.opacity='1'; },150); }
-  const subEl = $('scan-sub');
-  if (subEl) { subEl.style.opacity='0'; setTimeout(()=>{ subEl.textContent=s.sub; subEl.style.opacity='1'; },200); }
-}
-
-function hideLoader() {
-  const el = $('scan-overlay');
-  if (!el) return;
-  // Complete the bar
-  const bar = $('scan-bar'); if(bar) bar.style.width='100%';
-  const stageEl = $('scan-stage'); if(stageEl) stageEl.textContent='Done!';
-  // Fade out after short delay
-  setTimeout(() => {
-    el.classList.add('fade-out');
-    setTimeout(() => {
-      el.classList.remove('on','visible','fade-out');
-      if(bar) bar.style.width='0%';
-    }, 520);
-  }, 300);
-}
-
 async function doAnalysis() {
   setApiStatus('loading', 'Connecting…');
-  showLoader();
+  $('scan-overlay').classList.add('on');
   const ctaBtn=$('cta'); if(ctaBtn) ctaBtn.disabled=true;
-
-  // Advance through loader stages while waiting for API
-  let stageIdx = 0;
-  const stageTimer = setInterval(() => {
-    stageIdx++;
-    if (stageIdx < LOADER_STAGES.length) setLoaderStage(stageIdx);
-  }, 2200);
-
+  const bp=$('bar-prog');if(bp)bp.style.width='0%';
+  let p=0;
+  progInterval=setInterval(()=>{p=Math.min(90,p+Math.random()*3+1);if(bp)bp.style.width=p+'%';},130);
+  msgIdx=0;
+  scanInterval=setInterval(()=>{
+    const[m,s]=SCAN_MSGS[++msgIdx%SCAN_MSGS.length];
+    $('scan-msg').textContent=m;$('scan-sub').textContent=s;sndScan();
+  },900);
   let data; let usedFallback = false;
   const t0 = Date.now();
   try {
@@ -2133,27 +2013,25 @@ async function doAnalysis() {
     usedFallback = true;
     const ms = Date.now() - t0;
     const msg = e.message || 'Unknown error';
-    setApiStatus('fail', 'Fallback · ' + msg.substring(0,22), {
+    setApiStatus('fail', 'Fallback · ' + (msg.length > 22 ? msg.substring(0,22)+'…' : msg), {
       source: '✗ Local Fallback',
-      http: msg.includes('429')?'429 Quota exceeded':msg.includes('500')?'500 Server error':msg.includes('401')?'401 Unauthorized':'Failed',
+      http: msg.includes('429') ? '429 Quota exceeded' : msg.includes('500') ? '500 Server error' : msg.includes('401') ? '401 Unauthorized' : 'Failed',
       time: `${ms}ms`,
       endpoint: BACKEND_URL,
       error: msg,
     });
+    if (msg.includes('429') || msg.includes('quota')) {
+      toast('Even AI gave up on this PRD 😅 — showing local analysis');
+    } else {
+      toast('API unavailable — showing local analysis');
+    }
     data = getFallback(prdText);
   }
-
-  clearInterval(stageTimer);
-  hideLoader();
+  clearInterval(scanInterval);clearInterval(progInterval);
+  if(bp){bp.style.width='100%';setTimeout(()=>{bp.style.width='0%';},500);}
+  $('scan-overlay').classList.remove('on');
   const ctaBtn2=$('cta'); if(ctaBtn2) ctaBtn2.disabled=false;
-
-  // Wait for loader fade-out then render
-  setTimeout(() => {
-    lastResult=data;
-    renderResults(data);
-    resetBar();
-    if (!usedFallback) toast('✓ Roasted by Gemini AI.');
-  }, 380);
+  lastResult=data;renderResults(data);resetBar();
 }
 
 async function callAPI(txt) {

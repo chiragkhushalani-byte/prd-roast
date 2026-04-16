@@ -61,28 +61,48 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'Missing or empty transcript' });
   }
 
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY not set in Vercel environment variables' });
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_API_KEY) {
+    return res.status(500).json({ error: 'OPENAI_API_KEY not set in Vercel environment variables' });
   }
 
   const prompt = `You are an expert product manager coach. A stakeholder design review just happened.
-Transcript segments: "${transcript.substring(0, 3000)}"
+Transcript: "${transcript.substring(0, 3000)}"
 
-Analyse the feedback. Return ONLY a raw JSON array (no markdown, no backticks, no explanation):
+Analyse the feedback. Return ONLY a raw JSON array — no markdown, no backticks, no explanation:
 [
-  {"type":"take","text":"<actionable, user-grounded feedback worth implementing — be specific, reference the transcript>"},
-  {"type":"ignore","text":"<feedback that is vague, political, or not user-grounded — explain briefly why to deprioritise>"},
-  {"type":"neutral","text":"<something that needs more data or context before deciding>"}
+  {"type":"take","text":"<actionable, user-grounded feedback worth implementing — be specific, quote the transcript>"},
+  {"type":"ignore","text":"<feedback that is vague, political, or not user-grounded — explain briefly why to skip>"},
+  {"type":"neutral","text":"<something that needs more context or data before deciding>"}
 ]
-Be honest, witty, and specific. Always reference the actual transcript content.`;
+Be honest, witty, and specific. Always reference actual words from the transcript.`;
 
   try {
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const result = await model.generateContent(prompt);
-    const rawText = result.response.text();
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        max_tokens: 800,
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You are a product manager coach. Always respond with raw JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+
+    if (!openaiRes.ok) {
+      const errBody = await openaiRes.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || `HTTP ${openaiRes.status}`);
+    }
+
+    const data = await openaiRes.json();
+    const rawText = data.choices?.[0]?.message?.content || '';
 
     let parsed;
     try { parsed = extractJSON(rawText); }
@@ -96,10 +116,13 @@ Be honest, witty, and specific. Always reference the actual transcript content.`
       .filter(i => i && typeof i.type === 'string' && typeof i.text === 'string')
       .map(i => ({ type: ['take','ignore','neutral'].includes(i.type) ? i.type : 'neutral', text: i.text.trim() }))
       .slice(0, 8);
-
     return res.status(200).json(safe);
+
   } catch (err) {
-    console.error('[stakeholder] error:', err.message);
-    return res.status(500).json({ error: 'Even AI gave up 😅 — ' + (err.message||'').substring(0,100) });
+    const msg = err.message || String(err);
+    console.error('[stakeholder] OpenAI error:', msg);
+    if (msg.includes('401')) return res.status(401).json({ error: 'Invalid OpenAI API key' });
+    if (msg.includes('429')) return res.status(429).json({ error: 'OpenAI quota exceeded — check platform.openai.com/usage' });
+    return res.status(500).json({ error: 'Even AI gave up 😅 — ' + msg.substring(0, 100) });
   }
 };
