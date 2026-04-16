@@ -1,6 +1,5 @@
 // /api/analyze.js
-// Vercel Serverless Function — PRD Analysis via Gemini API
-// @google/generative-ai is required inside the handler for safer cold starts
+// Vercel Serverless Function — PRD Analysis via OpenAI API
 
 // ─── PROMPT ─────────────────────────────────────────────────────────────────
 function buildPrompt(prd, intensity) {
@@ -211,76 +210,75 @@ module.exports = async function handler(req, res) {
   }
 
   // ── Check API key ────────────────────────────────────────────────────────
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  if (!GEMINI_API_KEY) {
-    console.error('[analyze] GEMINI_API_KEY is not set in environment variables');
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_API_KEY) {
+    console.error('[analyze] OPENAI_API_KEY is not set');
     return res.status(500).json({
-      error: 'GEMINI_API_KEY not configured — add it in Vercel: Project Settings → Environment Variables'
+      error: 'OPENAI_API_KEY not configured — add it in Vercel: Project Settings → Environment Variables'
     });
   }
 
-  // ── Call Gemini with automatic model fallback ────────────────────────────
-  // Try models in order — each has a separate quota pool on the free tier
-  const MODELS = [
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b',
-  ];
-
-  const { GoogleGenerativeAI } = require('@google/generative-ai');
-  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  // ── Call OpenAI ──────────────────────────────────────────────────────────
   const prompt = buildPrompt(prd, intensity || 'spicy');
 
-  let lastErr = null;
+  try {
+    console.log('[analyze] Calling OpenAI gpt-4o-mini…');
 
-  for (const modelName of MODELS) {
-    try {
-      console.log(`[analyze] Trying model: ${modelName}`);
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      const rawText = result.response.text();
-
-      let parsed;
-      try {
-        parsed = extractJSON(rawText);
-      } catch (parseError) {
-        console.error('[analyze] JSON extraction failed:', parseError.message);
-        console.error('[analyze] Raw (first 600):', rawText.substring(0, 600));
-        return res.status(502).json({ error: 'AI returned an unreadable response — please try again' });
-      }
-
-      console.log(`[analyze] Success with model: ${modelName}`);
-      const response = sanitiseResponse(parsed);
-      response._model = modelName; // surface which model was used
-      return res.status(200).json(response);
-
-    } catch (err) {
-      const msg = err.message || String(err);
-      lastErr = msg;
-
-      // Only retry on quota errors — hard-fail on anything else
-      const isQuota = msg.includes('429') || msg.includes('QUOTA') || msg.includes('Resource has been exhausted') || msg.includes('quota');
-      if (!isQuota) {
-        console.error(`[analyze] Non-quota error on ${modelName}:`, msg);
-        break; // don't try other models — it won't help
-      }
-
-      console.warn(`[analyze] Quota hit on ${modelName}, trying next model…`);
-    }
-  }
-
-  // All models exhausted or non-recoverable error
-  const msg = lastErr || '';
-  if (msg.includes('API_KEY_INVALID') || msg.includes('403')) {
-    return res.status(401).json({ error: 'Invalid Gemini API key — check GEMINI_API_KEY in Vercel env vars' });
-  }
-  if (msg.includes('429') || msg.includes('QUOTA') || msg.includes('quota')) {
-    return res.status(429).json({
-      error: 'All Gemini models are quota-limited right now. Free tier resets daily — try again tomorrow, or add billing at aistudio.google.com to unlock higher limits.'
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        max_tokens: 2400,
+        temperature: 0.7,
+        response_format: { type: 'json_object' }, // forces valid JSON output
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a world-class senior product critic. Always respond with raw JSON only — no markdown, no explanation, no preamble.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      }),
     });
+
+    if (!openaiRes.ok) {
+      const errBody = await openaiRes.json().catch(() => ({}));
+      const errMsg = errBody.error?.message || `HTTP ${openaiRes.status}`;
+      console.error('[analyze] OpenAI error:', errMsg);
+
+      if (openaiRes.status === 401) return res.status(401).json({ error: 'Invalid OpenAI API key — check OPENAI_API_KEY in Vercel env vars' });
+      if (openaiRes.status === 429) return res.status(429).json({ error: 'OpenAI quota exceeded — check your plan at platform.openai.com/usage' });
+      if (openaiRes.status === 402) return res.status(402).json({ error: 'OpenAI billing required — add a payment method at platform.openai.com/account/billing' });
+      return res.status(500).json({ error: 'OpenAI error: ' + errMsg.substring(0, 120) });
+    }
+
+    const openaiData = await openaiRes.json();
+    const rawText = openaiData.choices?.[0]?.message?.content || '';
+
+    let parsed;
+    try {
+      parsed = extractJSON(rawText);
+    } catch (parseError) {
+      console.error('[analyze] JSON extraction failed:', parseError.message);
+      console.error('[analyze] Raw (first 600):', rawText.substring(0, 600));
+      return res.status(502).json({ error: 'AI returned an unreadable response — please try again' });
+    }
+
+    console.log('[analyze] Success with gpt-4o-mini');
+    const response = sanitiseResponse(parsed);
+    response._model = 'gpt-4o-mini';
+    return res.status(200).json(response);
+
+  } catch (err) {
+    const msg = err.message || String(err);
+    console.error('[analyze] OpenAI call failed:', msg);
+    return res.status(500).json({ error: 'Even AI gave up on this PRD 😅 — ' + msg.substring(0, 120) });
   }
-  if (msg.includes('SAFETY')) {
-    return res.status(422).json({ error: 'Content flagged by safety filter — try a different PRD' });
-  }
-  return res.status(500).json({ error: 'Even AI gave up on this PRD 😅 — ' + msg.substring(0, 120) });
 };
